@@ -10,6 +10,7 @@ import {
   useAutoScroll,
 } from "../hooks";
 import { useDeckStore } from "../lib/store";
+import { AgentSettingsModal } from "./AgentSettingsModal";
 import type { AgentStatus, ChatMessage, AgentSession } from "../types";
 import styles from "./AgentColumn.module.css";
 
@@ -203,6 +204,7 @@ export function AgentColumn({ agentId, columnIndex }: { agentId: string; columnI
   const deleteAgentOnGateway = useDeckStore((s) => s.deleteAgentOnGateway);
   const [input, setInput] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const scrollRef = useAutoScroll(session?.messages);
 
   if (!config || !session) return null;
@@ -293,7 +295,7 @@ export function AgentColumn({ agentId, columnIndex }: { agentId: string; columnI
           </div>
         </div>
         <div className={styles.headerActions}>
-          <button className={styles.headerBtn} title="Settings">
+          <button className={styles.headerBtn} title="Settings" onClick={() => setShowSettings(true)}>
             ⚙
           </button>
           {agentId !== "main" && (
@@ -371,6 +373,13 @@ export function AgentColumn({ agentId, columnIndex }: { agentId: string; columnI
           />
         )}
       </div>
+
+      {showSettings && (
+        <AgentSettingsModal
+          agent={config}
+          onClose={() => setShowSettings(false)}
+        />
+      )}
     </div>
   );
 }

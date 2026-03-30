@@ -34,13 +34,43 @@ const AGENT_ACCENTS = [
   "#2dd4bf",
 ];
 
-// ─── Column Config ───
+// ─── Column Config + Persistence ───
+
+const LAYOUT_STORAGE_KEY = "openclaw.deck.layout.v1";
 
 interface ColumnConfig {
   id: string;
   name?: string;
   accent?: string;
   icon?: string;
+}
+
+interface SavedLayout {
+  columnOrder: string[];
+  agents: Record<string, { name?: string; icon?: string; accent?: string }>;
+}
+
+function loadSavedLayout(): SavedLayout | null {
+  try {
+    const raw = localStorage.getItem(LAYOUT_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveLayout(columnOrder: string[], agents: AgentConfig[]) {
+  try {
+    const layout: SavedLayout = {
+      columnOrder,
+      agents: Object.fromEntries(
+        agents.map((a) => [a.id, { name: a.name, icon: a.icon, accent: a.accent }])
+      ),
+    };
+    localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(layout));
+  } catch {
+    // ignore
+  }
 }
 
 let _columnConfig: ColumnConfig[] | null = null;
@@ -52,7 +82,6 @@ async function loadColumnConfig(): Promise<ColumnConfig[]> {
     if (res.ok) {
       const data = await res.json();
       _columnConfig = data.columns ?? [];
-      console.log("[DeckStore] Loaded deck.config.json:", _columnConfig);
       return _columnConfig!;
     }
   } catch {
@@ -86,6 +115,8 @@ interface DeckStore {
   deleteAgentOnGateway: (agentId: string) => Promise<void>;
   fetchAgentsFromGateway: () => Promise<void>;
   loadChatHistory: (agentId: string) => Promise<void>;
+  updateAgentConfig: (agentId: string, updates: Partial<Pick<AgentConfig, "name" | "icon" | "accent">>) => void;
+  moveColumn: (agentId: string, direction: "left" | "right") => void;
   disconnect: () => void;
   setTheme: (themeId: string) => void;
 }
@@ -214,38 +245,53 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
         return;
       }
 
-      // Load column config to control order and display
+      // Load column config (file-based defaults) and saved layout (user customizations)
       const columns = await loadColumnConfig();
+      const saved = loadSavedLayout();
       const gatewayAgentsById = new Map(
         result.agents.map((a) => [a.id, a])
       );
-
-      // Build agent list: column config order first, then any remaining gateway agents
-      const orderedIds: string[] = [];
       const columnById = new Map(columns.map((c) => [c.id, c]));
 
-      // 1. Agents defined in deck.config.json (in config order), only if they exist on gateway
-      for (const col of columns) {
-        if (gatewayAgentsById.has(col.id)) {
-          orderedIds.push(col.id);
+      // Determine column order: saved > deck.config.json > gateway order
+      const orderedIds: string[] = [];
+      const usedIds = new Set<string>();
+
+      // 1. Saved layout order (user customizations via settings modal)
+      if (saved?.columnOrder?.length) {
+        for (const id of saved.columnOrder) {
+          if (gatewayAgentsById.has(id) && !usedIds.has(id)) {
+            orderedIds.push(id);
+            usedIds.add(id);
+          }
         }
       }
 
-      // 2. Remaining gateway agents not in the config
+      // 2. deck.config.json order (file-based defaults)
+      for (const col of columns) {
+        if (gatewayAgentsById.has(col.id) && !usedIds.has(col.id)) {
+          orderedIds.push(col.id);
+          usedIds.add(col.id);
+        }
+      }
+
+      // 3. Remaining gateway agents not yet ordered
       for (const a of result.agents) {
-        if (!orderedIds.includes(a.id)) {
+        if (!usedIds.has(a.id)) {
           orderedIds.push(a.id);
         }
       }
 
+      // Build agents: saved overrides > deck.config.json > gateway identity > defaults
       const newAgents: AgentConfig[] = orderedIds.map((id, i) => {
         const gw = gatewayAgentsById.get(id)!;
         const col = columnById.get(id);
+        const s = saved?.agents?.[id];
         return {
           id,
-          name: col?.name || gw.identity?.name || gw.name || id,
-          icon: col?.icon || gw.identity?.emoji || String(i + 1),
-          accent: col?.accent || AGENT_ACCENTS[i % AGENT_ACCENTS.length],
+          name: s?.name || col?.name || gw.identity?.name || gw.name || id,
+          icon: s?.icon || col?.icon || gw.identity?.emoji || String(i + 1),
+          accent: s?.accent || col?.accent || AGENT_ACCENTS[i % AGENT_ACCENTS.length],
           context: "",
         };
       });
@@ -347,7 +393,10 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
     });
   },
 
-  reorderColumns: (order) => set({ columnOrder: order }),
+  reorderColumns: (order) => {
+    set({ columnOrder: order });
+    saveLayout(order, get().config.agents);
+  },
 
   sendMessage: async (agentId, text) => {
     const { client, sessions } = get();
@@ -704,6 +753,27 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
       console.warn("[DeckStore] Gateway deleteAgent failed, removing locally:", err);
     }
     get().removeAgent(agentId);
+  },
+
+  updateAgentConfig: (agentId, updates) => {
+    set((state) => {
+      const agents = state.config.agents.map((a) =>
+        a.id === agentId ? { ...a, ...updates } : a
+      );
+      saveLayout(state.columnOrder, agents);
+      return { config: { ...state.config, agents } };
+    });
+  },
+
+  moveColumn: (agentId, direction) => {
+    const order = [...get().columnOrder];
+    const idx = order.indexOf(agentId);
+    if (idx < 0) return;
+    const targetIdx = direction === "left" ? idx - 1 : idx + 1;
+    if (targetIdx < 0 || targetIdx >= order.length) return;
+    [order[idx], order[targetIdx]] = [order[targetIdx], order[idx]];
+    set({ columnOrder: order });
+    saveLayout(order, get().config.agents);
   },
 
   disconnect: () => {
