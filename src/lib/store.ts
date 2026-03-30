@@ -113,8 +113,12 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
             sessions[id] = { ...sessions[id], connected: true };
           }
           set({ sessions });
-          // Fetch real agent list from gateway
-          get().fetchAgentsFromGateway();
+          // Fetch real agent list from gateway (small delay to let handshake fully settle)
+          setTimeout(() => {
+            get().fetchAgentsFromGateway().catch((err) => {
+              console.error("[DeckStore] fetchAgentsFromGateway error:", err);
+            });
+          }, 100);
         }
       },
     });
@@ -125,13 +129,20 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
 
   fetchAgentsFromGateway: async () => {
     const { client } = get();
-    if (!client?.connected) return;
+    if (!client?.connected) {
+      console.warn("[DeckStore] fetchAgentsFromGateway: client not connected, skipping");
+      return;
+    }
 
     try {
+      console.log("[DeckStore] Fetching agents from gateway...");
       const result = await client.listAgents();
-      console.log("[DeckStore] Gateway agents:", result);
+      console.log("[DeckStore] Gateway agents.list response:", JSON.stringify(result));
 
-      if (!result?.agents?.length) return;
+      if (!result?.agents?.length) {
+        console.warn("[DeckStore] No agents returned from gateway");
+        return;
+      }
 
       const newAgents: AgentConfig[] = result.agents.map((a, i) => ({
         id: a.id,
