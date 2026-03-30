@@ -1,0 +1,59 @@
+.voiceBtn {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid var(--theme-borderLight);
+  background: var(--theme-columnBg);
+  color: var(--theme-textMuted);
+  cursor: pointer;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.voiceBtn:hover {
+  background: var(--theme-inputBg);
+  color: var(--theme-textSecondary);
+}
+
+.recording {
+  width: auto;
+  padding: 0 10px;
+  gap: 6px;
+  border-color: rgba(239, 68, 68, 0.4);
+  animation: recordPulse 1.5s ease-in-out infinite;
+}
+
+.recordingInner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-family: "JetBrains Mono", monospace;
+}
+
+.recordDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #fff;
+  animation: dotPulse 1s ease-in-out infinite;
+}
+
+.micIcon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+@keyframes recordPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.8; }
+}
+
+@keyframes dotPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}

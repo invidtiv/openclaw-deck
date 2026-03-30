@@ -11,6 +11,7 @@ import {
 } from "../hooks";
 import { useDeckStore } from "../lib/store";
 import { AgentSettingsModal } from "./AgentSettingsModal";
+import { VoiceRecordButton } from "./VoiceRecordButton";
 import type { AgentStatus, ChatMessage, AgentSession } from "../types";
 import styles from "./AgentColumn.module.css";
 
@@ -352,6 +353,15 @@ export function AgentColumn({ agentId, columnIndex }: { agentId: string; columnI
             autoComplete="off"
             autoCapitalize="off"
             rows={4}
+          />
+          <VoiceRecordButton
+            accent={config.accent}
+            onTranscript={(text) => setInput(text)}
+            onSendAudio={(_base64, _mime, transcript) => {
+              if (transcript && transcript !== "[voice message]") {
+                send(transcript);
+              }
+            }}
           />
           <button
             className={styles.sendBtn}
