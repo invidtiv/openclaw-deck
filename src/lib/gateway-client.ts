@@ -229,6 +229,45 @@ export class GatewayClient {
     }>;
   }
 
+  /** List sessions for an agent (or all agents) */
+  async listSessions(params: {
+    limit?: number;
+    includeDerivedTitles?: boolean;
+  } = {}): Promise<{
+    sessions: Array<{
+      key: string;
+      kind?: string;
+      label?: string;
+      displayName?: string;
+      derivedTitle?: string;
+      channel?: string;
+      updatedAt?: number;
+      status?: string;
+      totalTokens?: number;
+      model?: string;
+      modelProvider?: string;
+    }>;
+  }> {
+    return this.request("sessions.list", {
+      limit: params.limit ?? 100,
+      includeDerivedTitles: params.includeDerivedTitles ?? true,
+    }) as Promise<{
+      sessions: Array<{
+        key: string;
+        kind?: string;
+        label?: string;
+        displayName?: string;
+        derivedTitle?: string;
+        channel?: string;
+        updatedAt?: number;
+        status?: string;
+        totalTokens?: number;
+        model?: string;
+        modelProvider?: string;
+      }>;
+    }>;
+  }
+
   /** Fetch chat history for a session */
   async chatHistory(
     sessionKey: string,

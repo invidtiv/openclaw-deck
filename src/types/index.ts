@@ -102,6 +102,8 @@ export interface AgentSession {
   connected: boolean;
   /** Real usage data from gateway */
   usage?: SessionUsage;
+  /** Active session key (e.g. "agent:main:telegram:main:direct:123") */
+  sessionKey?: string;
 }
 
 // ─── Connection Config ───

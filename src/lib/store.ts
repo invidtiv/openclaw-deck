@@ -48,6 +48,7 @@ interface ColumnConfig {
 interface SavedLayout {
   columnOrder: string[];
   agents: Record<string, { name?: string; icon?: string; accent?: string }>;
+  sessionKeys?: Record<string, string>;
 }
 
 function loadSavedLayout(): SavedLayout | null {
@@ -117,6 +118,8 @@ interface DeckStore {
   loadChatHistory: (agentId: string) => Promise<void>;
   updateAgentConfig: (agentId: string, updates: Partial<Pick<AgentConfig, "name" | "icon" | "accent">>) => void;
   moveColumn: (agentId: string, direction: "left" | "right") => void;
+  setAgentSessionKey: (agentId: string, sessionKey: string) => Promise<void>;
+  listAgentSessions: (agentId: string) => Promise<Array<{ key: string; label: string; channel: string; updatedAt: number }>>;
   disconnect: () => void;
   setTheme: (themeId: string) => void;
 }
@@ -306,6 +309,11 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
           ? { ...existingSessions[agent.id], connected: true }
           : createSession(agent.id);
         sessions[agent.id].connected = true;
+        // Restore saved session key
+        const savedKeys = saved?.sessionKeys;
+        if (savedKeys?.[agent.id]) {
+          sessions[agent.id].sessionKey = savedKeys[agent.id];
+        }
         columnOrder.push(agent.id);
       }
 
@@ -330,8 +338,8 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
     if (!client?.connected) return;
 
     try {
-      // Use the same sessionKey format as sendMessage
-      const sessionKey = `agent:${agentId}:deck-${agentId}`;
+      // Use the selected session key, or default to deck session
+      const sessionKey = get().sessions[agentId]?.sessionKey || `agent:${agentId}:deck-${agentId}`;
       const result = await client.chatHistory(sessionKey, 50);
       const rawMessages = result?.messages ?? [];
       if (!rawMessages.length) return;
@@ -428,8 +436,8 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
     }));
 
     try {
-      // Route to the actual agent on the gateway (not hardcoded "main")
-      const sessionKey = `agent:${agentId}:deck-${agentId}`;
+      // Use the selected session key, or default to deck session
+      const sessionKey = get().sessions[agentId]?.sessionKey || `agent:${agentId}:deck-${agentId}`;
       const { runId } = await client.runAgent(agentId, text, sessionKey);
 
       // Create placeholder assistant message for streaming
@@ -552,15 +560,27 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
 
         // Extract agent ID from sessionKey "agent:<agentId>:<suffix>"
         const parts = sessionKey?.split(":") ?? [];
-        const agentId = parts.length >= 2 ? parts[1] : "main";
+        const rawAgentId = parts.length >= 2 ? parts[1] : "main";
+
+        // Find which column is displaying this session key
+        // (could be a Telegram session shown in a deck column)
+        let agentId = rawAgentId;
+        if (sessionKey && !get().sessions[rawAgentId]?.activeRunId) {
+          const matchBySessionKey = Object.values(get().sessions).find(
+            (s) => s.sessionKey === sessionKey
+          );
+          if (matchBySessionKey) {
+            agentId = matchBySessionKey.agentId;
+          }
+        }
 
         // Check if we have a session for this agent
         if (!get().sessions[agentId]) {
-          // Try matching by runId across all sessions
           const matchingAgent = Object.values(get().sessions).find(
             (s) => s.activeRunId === runId
           );
           if (!matchingAgent) break;
+          agentId = matchingAgent.agentId;
         }
 
         if (stream === "assistant" && data?.delta) {
@@ -753,6 +773,67 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
       console.warn("[DeckStore] Gateway deleteAgent failed, removing locally:", err);
     }
     get().removeAgent(agentId);
+  },
+
+  setAgentSessionKey: async (agentId, sessionKey) => {
+    // Update the session key and reload history
+    set((state) => {
+      const session = state.sessions[agentId];
+      if (!session) return state;
+      return {
+        sessions: {
+          ...state.sessions,
+          [agentId]: {
+            ...session,
+            sessionKey,
+            messages: [], // Clear messages before loading new session
+            activeRunId: null,
+            status: "idle",
+          },
+        },
+      };
+    });
+    // Save to layout
+    const saved = loadSavedLayout() || { columnOrder: [], agents: {} };
+    saved.sessionKeys = { ...saved.sessionKeys, [agentId]: sessionKey };
+    try {
+      localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(saved));
+    } catch { /* ignore */ }
+    // Load history for the new session
+    await get().loadChatHistory(agentId);
+  },
+
+  listAgentSessions: async (agentId) => {
+    const { client } = get();
+    if (!client?.connected) return [];
+    try {
+      const result = await client.listSessions({ limit: 100, includeDerivedTitles: true });
+      const prefix = `agent:${agentId}:`;
+      return result.sessions
+        .filter((s) => s.key.startsWith(prefix))
+        .map((s) => {
+          const suffix = s.key.slice(prefix.length);
+          // Build a human-readable label
+          let label = s.displayName || s.label || s.derivedTitle || suffix;
+          // Clean up derived titles (remove timestamps)
+          if (label.startsWith("[")) {
+            const closeBracket = label.indexOf("]");
+            if (closeBracket > 0) label = label.slice(closeBracket + 2) || suffix;
+          }
+          // Truncate
+          if (label.length > 60) label = label.slice(0, 57) + "...";
+          return {
+            key: s.key,
+            label: label || suffix,
+            channel: s.channel || (suffix.includes("telegram") ? "telegram" : suffix.includes("cron") ? "cron" : suffix.includes("deck") ? "deck" : ""),
+            updatedAt: s.updatedAt || 0,
+          };
+        })
+        .sort((a, b) => b.updatedAt - a.updatedAt);
+    } catch (err) {
+      console.warn("[DeckStore] Failed to list sessions:", err);
+      return [];
+    }
   },
 
   updateAgentConfig: (agentId, updates) => {
