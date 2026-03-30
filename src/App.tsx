@@ -10,50 +10,19 @@ import { themes, applyTheme } from "./themes";
 import "./App.css";
 
 /**
- * Agent column configuration.
- *
- * You're running default single-agent mode, so there's one agent: "main".
- * The Gateway routes all messages to the default workspace at:
- *   /Users/austenallred/.openclaw/workspace
- *
- * To add more columns later, set up multi-agent in openclaw.json:
- *   { "agents": { "list": [
- *     { "id": "research", "workspace": "~/.openclaw/workspace-research" },
- *     { "id": "codegen",  "workspace": "~/.openclaw/workspace-codegen" },
- *   ]}}
- *
- * Then add matching entries here.
+ * Agent columns are fetched from the gateway on connect via agents.list.
+ * A minimal fallback ("main") is provided in case the fetch fails.
  */
-const AGENT_ACCENTS = [
-  "#22d3ee",
-  "#a78bfa",
-  "#34d399",
-  "#f59e0b",
-  "#f472b6",
-  "#60a5fa",
-  "#facc15",
-  "#fb7185",
-  "#4ade80",
-  "#c084fc",
-  "#f97316",
-  "#2dd4bf",
-];
-
-function buildDefaultAgents(count: number): AgentConfig[] {
-  return Array.from({ length: count }, (_, i) => {
-    // First agent uses "main" (default agent in OpenClaw)
-    const agentId = i === 0 ? "main" : `agent-${i + 1}`;
-    const agentName = i === 0 ? "Main" : `Agent ${i + 1}`;
-    
-    return {
-      id: agentId,
-      name: agentName,
-      icon: String(i + 1),
-      accent: AGENT_ACCENTS[i % AGENT_ACCENTS.length],
+function buildFallbackAgents(): AgentConfig[] {
+  return [
+    {
+      id: "main",
+      name: "Main",
+      icon: "1",
+      accent: "#22d3ee",
       context: "",
-      model: "claude-sonnet-4-5",
-    };
-  });
+    },
+  ];
 }
 
 function getGatewayConfig() {
@@ -82,7 +51,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState("All Agents");
   const [showAddModal, setShowAddModal] = useState(false);
   const [initialAgents] = useState<AgentConfig[]>(() =>
-    buildDefaultAgents(7)
+    buildFallbackAgents()
   );
   const columnOrder = useDeckStore((s) => s.columnOrder);
   const createAgentOnGateway = useDeckStore((s) => s.createAgentOnGateway);

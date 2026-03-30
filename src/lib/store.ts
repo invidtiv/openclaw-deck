@@ -19,6 +19,21 @@ const DEFAULT_CONFIG: DeckConfig = {
   agents: [],
 };
 
+const AGENT_ACCENTS = [
+  "#22d3ee",
+  "#a78bfa",
+  "#34d399",
+  "#f59e0b",
+  "#f472b6",
+  "#60a5fa",
+  "#facc15",
+  "#fb7185",
+  "#4ade80",
+  "#c084fc",
+  "#f97316",
+  "#2dd4bf",
+];
+
 // ─── Store Shape ───
 
 interface DeckStore {
@@ -41,6 +56,7 @@ interface DeckStore {
   handleGatewayEvent: (event: GatewayEvent) => void;
   createAgentOnGateway: (agent: AgentConfig) => Promise<void>;
   deleteAgentOnGateway: (agentId: string) => Promise<void>;
+  fetchAgentsFromGateway: () => Promise<void>;
   disconnect: () => void;
   setTheme: (themeId: string) => void;
 }
@@ -74,6 +90,7 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
 
   initialize: (partialConfig) => {
     const config = { ...DEFAULT_CONFIG, ...partialConfig };
+    // Start with whatever agents are passed (fallback defaults)
     const sessions: Record<string, AgentSession> = {};
     const columnOrder: string[] = [];
 
@@ -96,12 +113,56 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
             sessions[id] = { ...sessions[id], connected: true };
           }
           set({ sessions });
+          // Fetch real agent list from gateway
+          get().fetchAgentsFromGateway();
         }
       },
     });
 
     set({ config, sessions, columnOrder, client });
     client.connect();
+  },
+
+  fetchAgentsFromGateway: async () => {
+    const { client } = get();
+    if (!client?.connected) return;
+
+    try {
+      const result = await client.listAgents();
+      console.log("[DeckStore] Gateway agents:", result);
+
+      if (!result?.agents?.length) return;
+
+      const newAgents: AgentConfig[] = result.agents.map((a, i) => ({
+        id: a.id,
+        name: a.identity?.name || a.name || a.id,
+        icon: a.identity?.emoji || String(i + 1),
+        accent: AGENT_ACCENTS[i % AGENT_ACCENTS.length],
+        context: "",
+      }));
+
+      // Build sessions, preserving any existing message history
+      const existingSessions = get().sessions;
+      const sessions: Record<string, AgentSession> = {};
+      const columnOrder: string[] = [];
+
+      for (const agent of newAgents) {
+        sessions[agent.id] = existingSessions[agent.id]
+          ? { ...existingSessions[agent.id], connected: true }
+          : createSession(agent.id);
+        sessions[agent.id].connected = true;
+        columnOrder.push(agent.id);
+      }
+
+      set({
+        config: { ...get().config, agents: newAgents },
+        sessions,
+        columnOrder,
+      });
+    } catch (err) {
+      console.warn("[DeckStore] Failed to fetch agents from gateway:", err);
+      // Keep fallback agents
+    }
   },
 
   addAgent: (agent) => {
@@ -164,10 +225,9 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
     }));
 
     try {
-      // All columns route through the default "main" agent on the gateway,
-      // using distinct session keys to keep conversations separate.
-      const sessionKey = `agent:main:${agentId}`;
-      const { runId } = await client.runAgent("main", text, sessionKey);
+      // Route to the actual agent on the gateway (not hardcoded "main")
+      const sessionKey = `agent:${agentId}:deck-${agentId}`;
+      const { runId } = await client.runAgent(agentId, text, sessionKey);
 
       // Create placeholder assistant message for streaming
       const assistantMsg: ChatMessage = {
@@ -192,11 +252,19 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
       }));
     } catch (err) {
       console.error(`Failed to run agent ${agentId}:`, err);
+      // Show error as a system message so the user can see what went wrong
+      const errorMsg: ChatMessage = {
+        id: makeId(),
+        role: "system",
+        text: `Error: ${err instanceof Error ? err.message : String(err)}`,
+        timestamp: Date.now(),
+      };
       set((state) => ({
         sessions: {
           ...state.sessions,
           [agentId]: {
             ...state.sessions[agentId],
+            messages: [...state.sessions[agentId].messages, errorMsg],
             status: "error",
           },
         },
@@ -272,16 +340,25 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
 
     switch (event.event) {
       // Agent streaming events
-      // Format: { runId, stream: "assistant"|"lifecycle"|"tool_use", data: {...}, sessionKey: "agent:<id>:<key>" }
+      // Format: { runId, stream: "assistant"|"lifecycle"|"tool"|"error", data: {...}, sessionKey: "agent:<id>:<key>" }
       case "agent": {
         const runId = payload.runId as string;
         const stream = payload.stream as string | undefined;
         const data = payload.data as Record<string, unknown> | undefined;
         const sessionKey = payload.sessionKey as string | undefined;
 
-        // Extract column ID from sessionKey "agent:main:<columnId>"
+        // Extract agent ID from sessionKey "agent:<agentId>:<suffix>"
         const parts = sessionKey?.split(":") ?? [];
-        const agentId = parts[2] ?? parts[1] ?? "main";
+        const agentId = parts.length >= 2 ? parts[1] : "main";
+
+        // Check if we have a session for this agent
+        if (!get().sessions[agentId]) {
+          // Try matching by runId across all sessions
+          const matchingAgent = Object.values(get().sessions).find(
+            (s) => s.activeRunId === runId
+          );
+          if (!matchingAgent) break;
+        }
 
         if (stream === "assistant" && data?.delta) {
           get().appendMessageChunk(agentId, runId, data.delta as string);
@@ -292,9 +369,55 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
             get().setAgentStatus(agentId, "thinking");
           } else if (phase === "end") {
             get().finalizeMessage(agentId, runId);
+          } else if (phase === "error") {
+            // Show error message from lifecycle error
+            const errorText = (data?.error as string) || "Agent run failed";
+            const session = get().sessions[agentId];
+            if (session) {
+              const errorMsg: ChatMessage = {
+                id: makeId(),
+                role: "system",
+                text: `Error: ${errorText}`,
+                timestamp: Date.now(),
+              };
+              set((state) => ({
+                sessions: {
+                  ...state.sessions,
+                  [agentId]: {
+                    ...state.sessions[agentId],
+                    messages: [...state.sessions[agentId].messages, errorMsg],
+                    activeRunId: null,
+                    status: "error",
+                  },
+                },
+              }));
+            }
           }
-        } else if (stream === "tool_use") {
+        } else if (stream === "tool") {
+          // Gateway uses "tool" not "tool_use"
           get().setAgentStatus(agentId, "tool_use");
+        } else if (stream === "error") {
+          const reason = (data?.reason as string) || "Unknown error";
+          const session = get().sessions[agentId];
+          if (session) {
+            const errorMsg: ChatMessage = {
+              id: makeId(),
+              role: "system",
+              text: `Error: ${reason}`,
+              timestamp: Date.now(),
+            };
+            set((state) => ({
+              sessions: {
+                ...state.sessions,
+                [agentId]: {
+                  ...state.sessions[agentId],
+                  messages: [...state.sessions[agentId].messages, errorMsg],
+                  activeRunId: null,
+                  status: "error",
+                },
+              },
+            }));
+          }
         }
         break;
       }
@@ -332,7 +455,7 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
       case "compaction": {
         const sessionKey = payload.sessionKey as string | undefined;
         const parts = sessionKey?.split(":") ?? [];
-        const agentId = parts[2] ?? parts[1] ?? "main";
+        const agentId = parts.length >= 2 ? parts[1] : "main";
         const beforeTokens = (payload.beforeTokens as number) ?? 0;
         const afterTokens = (payload.afterTokens as number) ?? 0;
         const droppedMessages = (payload.droppedMessages as number) ?? 0;
@@ -365,7 +488,7 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
       case "sessions.usage": {
         const sessionKey = payload.sessionKey as string | undefined;
         const parts = sessionKey?.split(":") ?? [];
-        const agentId = parts[2] ?? parts[1] ?? "main";
+        const agentId = parts.length >= 2 ? parts[1] : "main";
         const usage = payload.usage as SessionUsage | undefined;
 
         if (usage) {
@@ -396,22 +519,29 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
     const { client } = get();
     try {
       if (client?.connected) {
-        await client.createAgent({
-          id: agent.id,
+        // Gateway requires name + workspace; workspace defaults to ~/.openclaw/workspace-<id>
+        const result = await client.createAgent({
           name: agent.name,
-          model: agent.model,
-          context: agent.context,
-          shell: agent.shell,
+          workspace: `~/.openclaw/workspace-${agent.id}`,
+          emoji: agent.icon.length <= 2 ? agent.icon : undefined,
         });
+        // Use the agentId the gateway assigned (normalized from name)
+        agent = { ...agent, id: result.agentId };
       }
     } catch (err) {
-      console.warn("[DeckStore] Gateway createAgent failed, adding locally:", err);
+      console.warn("[DeckStore] Gateway createAgent failed:", err);
+      throw err; // Propagate so the UI shows the error
     }
     get().addAgent(agent);
   },
 
   deleteAgentOnGateway: async (agentId) => {
     const { client } = get();
+    // Prevent deleting the main agent
+    if (agentId === "main") {
+      console.warn("[DeckStore] Cannot delete the main agent");
+      return;
+    }
     try {
       if (client?.connected) {
         await client.deleteAgent(agentId);

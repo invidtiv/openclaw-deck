@@ -63,6 +63,7 @@ export class GatewayClient {
   private intentionalClose = false;
   private _connected = false;
   private msgCounter = 0;
+  private challengeResolver: ((nonce: string) => void) | null = null;
 
   constructor(opts: GatewayClientOptions) {
     this.options = {
@@ -188,31 +189,44 @@ export class GatewayClient {
     return this.request("health");
   }
 
-  /** Create an agent on the gateway */
+  /** Create an agent on the gateway (name + workspace required) */
   async createAgent(params: {
-    id: string;
     name: string;
-    model?: string;
-    context?: string;
-    shell?: string;
-  }): Promise<unknown> {
-    return this.request("agents.create", params);
+    workspace: string;
+    emoji?: string;
+  }): Promise<{ ok: boolean; agentId: string; name: string; workspace: string }> {
+    return this.request("agents.create", params) as Promise<{
+      ok: boolean;
+      agentId: string;
+      name: string;
+      workspace: string;
+    }>;
   }
 
   /** Update an existing agent on the gateway */
   async updateAgent(params: {
-    id: string;
+    agentId: string;
     name?: string;
+    workspace?: string;
     model?: string;
-    context?: string;
-    shell?: string;
   }): Promise<unknown> {
     return this.request("agents.update", params);
   }
 
-  /** Delete an agent from the gateway */
+  /** Delete an agent from the gateway (keep workspace files) */
   async deleteAgent(agentId: string): Promise<unknown> {
-    return this.request("agents.delete", { agentId });
+    return this.request("agents.delete", { agentId, deleteFiles: false });
+  }
+
+  /** List all agents configured on the gateway */
+  async listAgents(): Promise<{
+    defaultId: string;
+    agents: Array<{ id: string; name?: string; identity?: { name?: string; emoji?: string } }>;
+  }> {
+    return this.request("agents.list", {}) as Promise<{
+      defaultId: string;
+      agents: Array<{ id: string; name?: string; identity?: { name?: string; emoji?: string } }>;
+    }>;
   }
 
   // ─── Private ───
@@ -226,46 +240,16 @@ export class GatewayClient {
       return;
     }
 
-    this.ws.onopen = async () => {
-      console.log("[GatewayClient] Socket opened, sending handshake...");
-      try {
-        let device: { id: string; publicKey: string; signature: string; signedAt: number } | undefined;
-        try {
-          device = await this.buildSignedDeviceIdentity();
-        } catch (deviceErr) {
-          console.warn("[GatewayClient] Device identity unavailable; falling back to token-only auth:", deviceErr);
-        }
-
-        const hello = (await this.request("connect", {
-          client: {
-            id: "gateway-client",
-            version: "2026.2.16",
-            platform: "web",
-            mode: "webchat",
-          },
-          minProtocol: 3,
-          maxProtocol: 3,
-          role: "operator",
-          scopes: OPERATOR_SCOPES,
-          auth: this.getPreferredAuthToken()
-            ? { token: this.getPreferredAuthToken() }
-            : undefined,
-          ...(device ? { device } : {}),
-        })) as { auth?: { deviceToken?: string } };
-
-        const issuedDeviceToken = hello?.auth?.deviceToken;
-        if (issuedDeviceToken) {
-          this.storeDeviceToken(issuedDeviceToken);
-        }
-
-        this._connected = true;
-        this.reconnectAttempts = 0;
-        this.options.onConnection(true);
-        console.log("[GatewayClient] Connected to gateway");
-      } catch (err) {
-        console.error("[GatewayClient] Handshake failed:", err);
-        this.ws?.close(4001, "handshake failed");
-      }
+    this.ws.onopen = () => {
+      console.log("[GatewayClient] Socket opened to", this.options.url, "waiting for challenge...");
+      // The gateway sends a connect.challenge event with a nonce before
+      // accepting a connect request. Wait for it, then complete handshake.
+      this.waitForChallenge()
+        .then((nonce) => this.completeHandshake(nonce))
+        .catch((err) => {
+          console.error("[GatewayClient] Challenge/handshake failed:", err);
+          this.ws?.close(4001, "handshake failed");
+        });
     };
 
     this.ws.onmessage = (evt) => {
@@ -280,6 +264,11 @@ export class GatewayClient {
     this.ws.onclose = (evt) => {
       const wasConnected = this._connected;
       this._connected = false;
+
+      // Cancel any pending challenge wait
+      if (this.challengeResolver) {
+        this.challengeResolver = null;
+      }
 
       if (wasConnected) {
         this.options.onConnection(false);
@@ -314,11 +303,75 @@ export class GatewayClient {
         break;
       }
       case "event": {
+        // Intercept the challenge event to complete the handshake
+        if (
+          frame.event === "connect.challenge" &&
+          this.challengeResolver
+        ) {
+          const payload = frame.payload as { nonce?: string };
+          if (payload?.nonce) {
+            console.log("[GatewayClient] Received challenge nonce");
+            this.challengeResolver(payload.nonce);
+            this.challengeResolver = null;
+          }
+          break;
+        }
         this.options.onEvent(frame);
         break;
       }
       default:
         break;
+    }
+  }
+
+  private waitForChallenge(): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.challengeResolver = null;
+        reject(new Error("Timed out waiting for connect.challenge"));
+      }, 10_000);
+
+      this.challengeResolver = (nonce: string) => {
+        clearTimeout(timeout);
+        resolve(nonce);
+      };
+    });
+  }
+
+  private async completeHandshake(_nonce: string): Promise<void> {
+    try {
+      // Send the connect request immediately — the gateway enforces a tight
+      // deadline after the challenge.  Device identity (Ed25519 signing) is
+      // expensive and optional when dangerouslyDisableDeviceAuth is enabled,
+      // so we skip it to avoid timing out.
+      const hello = (await this.request("connect", {
+        client: {
+          id: "gateway-client",
+          version: "2026.2.16",
+          platform: "web",
+          mode: "webchat",
+        },
+        minProtocol: 3,
+        maxProtocol: 3,
+        role: "operator",
+        scopes: OPERATOR_SCOPES,
+        auth: this.getPreferredAuthToken()
+          ? { token: this.getPreferredAuthToken() }
+          : undefined,
+      })) as { auth?: { deviceToken?: string } };
+
+      const issuedDeviceToken = hello?.auth?.deviceToken;
+      if (issuedDeviceToken) {
+        this.storeDeviceToken(issuedDeviceToken);
+      }
+
+      this._connected = true;
+      this.reconnectAttempts = 0;
+      this.options.onConnection(true);
+      console.log("[GatewayClient] Connected to gateway");
+    } catch (err) {
+      console.error("[GatewayClient] Handshake failed:", err);
+      this.ws?.close(4001, "handshake failed");
     }
   }
 
@@ -374,20 +427,23 @@ export class GatewayClient {
   }
 
   private getPreferredAuthToken(): string {
-    return this.getStoredDeviceToken() || this.options.token || "";
+    // Always use the config token — stored device tokens become invalid
+    // after gateway restarts and cause token_mismatch errors.
+    return this.options.token || this.getStoredDeviceToken() || "";
   }
 
-  private async buildSignedDeviceIdentity(): Promise<{
+  private async buildSignedDeviceIdentity(nonce?: string): Promise<{
     id: string;
     publicKey: string;
     signature: string;
     signedAt: number;
+    nonce?: string;
   }> {
     const identity = await this.loadOrCreateDeviceIdentity();
     const signedAt = Date.now();
 
     const payload = this.buildDeviceAuthPayload({
-      version: "v1",
+      version: nonce ? "v2" : "v1",
       deviceId: identity.id,
       clientId: "gateway-client",
       clientMode: "webchat",
@@ -395,6 +451,7 @@ export class GatewayClient {
       scopes: OPERATOR_SCOPES,
       signedAtMs: signedAt,
       token: this.getPreferredAuthToken() || null,
+      nonce,
     });
 
     const key = await crypto.subtle.importKey(
@@ -416,6 +473,7 @@ export class GatewayClient {
       publicKey: identity.publicKey,
       signature: this.base64UrlEncode(new Uint8Array(signature)),
       signedAt,
+      ...(nonce ? { nonce } : {}),
     };
   }
 

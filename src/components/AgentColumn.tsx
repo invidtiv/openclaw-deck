@@ -86,6 +86,17 @@ function MessageBubble({
     );
   }
 
+  if (message.role === "system") {
+    return (
+      <div className={`${styles.messageBubble} ${styles.assistantMsg}`}>
+        <div className={styles.roleLabel} style={{ color: "#ef4444" }}>System</div>
+        <div className={styles.messageText} style={{ color: "#ef4444", opacity: 0.9 }}>
+          {message.text}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className={`${styles.messageBubble} ${
@@ -285,20 +296,22 @@ export function AgentColumn({ agentId, columnIndex }: { agentId: string; columnI
           <button className={styles.headerBtn} title="Settings">
             ⚙
           </button>
-          <button
-            className={`${styles.deleteBtn} ${confirmDelete ? styles.confirmDelete : ""}`}
-            title={confirmDelete ? "Click again to confirm" : "Delete agent"}
-            onClick={() => {
-              if (confirmDelete) {
-                deleteAgentOnGateway(agentId);
-              } else {
-                setConfirmDelete(true);
-                setTimeout(() => setConfirmDelete(false), 3000);
-              }
-            }}
-          >
-            {confirmDelete ? "✕" : "×"}
-          </button>
+          {agentId !== "main" && (
+            <button
+              className={`${styles.deleteBtn} ${confirmDelete ? styles.confirmDelete : ""}`}
+              title={confirmDelete ? "Click again to confirm" : "Delete agent"}
+              onClick={() => {
+                if (confirmDelete) {
+                  deleteAgentOnGateway(agentId);
+                } else {
+                  setConfirmDelete(true);
+                  setTimeout(() => setConfirmDelete(false), 3000);
+                }
+              }}
+            >
+              {confirmDelete ? "✕" : "×"}
+            </button>
+          )}
         </div>
       </div>
 

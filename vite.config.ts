@@ -5,12 +5,16 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
+    host: "0.0.0.0",
     proxy: {
       "/ws": {
         target: "ws://127.0.0.1:18789",
         ws: true,
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/ws/, ""),
+        headers: {
+          Origin: "http://127.0.0.1:18789",
+        },
       },
     },
   },
