@@ -57,11 +57,53 @@ interface DeckStore {
   createAgentOnGateway: (agent: AgentConfig) => Promise<void>;
   deleteAgentOnGateway: (agentId: string) => Promise<void>;
   fetchAgentsFromGateway: () => Promise<void>;
+  loadChatHistory: (agentId: string) => Promise<void>;
   disconnect: () => void;
   setTheme: (themeId: string) => void;
 }
 
 // ─── Helpers ───
+
+/**
+ * Convert an Anthropic-format message from chat.history into our ChatMessage.
+ * Extracts text from content blocks, skips tool results and thinking blocks.
+ */
+function convertGatewayMessage(msg: Record<string, unknown>): ChatMessage | null {
+  const role = msg.role as string;
+  const timestamp = (msg.timestamp as number) || Date.now();
+  const content = msg.content;
+
+  if (role === "user") {
+    let text = "";
+    if (typeof content === "string") {
+      text = content;
+    } else if (Array.isArray(content)) {
+      text = content
+        .filter((c: Record<string, unknown>) => c.type === "text")
+        .map((c: Record<string, unknown>) => c.text as string)
+        .join("\n");
+    }
+    if (!text) return null;
+    return { id: makeId(), role: "user", text, timestamp };
+  }
+
+  if (role === "assistant") {
+    let text = "";
+    if (typeof content === "string") {
+      text = content;
+    } else if (Array.isArray(content)) {
+      text = content
+        .filter((c: Record<string, unknown>) => c.type === "text")
+        .map((c: Record<string, unknown>) => c.text as string)
+        .join("\n");
+    }
+    if (!text) return null;
+    return { id: makeId(), role: "assistant", text, timestamp };
+  }
+
+  // Skip toolResult, system, etc.
+  return null;
+}
 
 function createSession(agentId: string): AgentSession {
   return {
@@ -170,9 +212,54 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
         sessions,
         columnOrder,
       });
+
+      // Load chat history for each agent in parallel
+      await Promise.allSettled(
+        newAgents.map((agent) => get().loadChatHistory(agent.id))
+      );
     } catch (err) {
       console.warn("[DeckStore] Failed to fetch agents from gateway:", err);
       // Keep fallback agents
+    }
+  },
+
+  loadChatHistory: async (agentId) => {
+    const { client } = get();
+    if (!client?.connected) return;
+
+    try {
+      // Use the same sessionKey format as sendMessage
+      const sessionKey = `agent:${agentId}:deck-${agentId}`;
+      const result = await client.chatHistory(sessionKey, 50);
+      const rawMessages = result?.messages ?? [];
+      if (!rawMessages.length) return;
+
+      const messages: ChatMessage[] = [];
+      for (const raw of rawMessages) {
+        const msg = convertGatewayMessage(raw as Record<string, unknown>);
+        if (msg) messages.push(msg);
+      }
+
+      if (!messages.length) return;
+
+      set((state) => {
+        const session = state.sessions[agentId];
+        if (!session) return state;
+        return {
+          sessions: {
+            ...state.sessions,
+            [agentId]: {
+              ...session,
+              // Prepend history before any new messages
+              messages: [...messages, ...session.messages],
+            },
+          },
+        };
+      });
+      console.log(`[DeckStore] Loaded ${messages.length} history messages for ${agentId}`);
+    } catch (err) {
+      // Session might not exist yet — that's fine
+      console.debug(`[DeckStore] No chat history for ${agentId}:`, err);
     }
   },
 

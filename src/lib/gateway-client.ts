@@ -229,6 +229,17 @@ export class GatewayClient {
     }>;
   }
 
+  /** Fetch chat history for a session */
+  async chatHistory(
+    sessionKey: string,
+    limit = 50
+  ): Promise<{ sessionKey: string; messages: unknown[] }> {
+    return this.request("chat.history", { sessionKey, limit }) as Promise<{
+      sessionKey: string;
+      messages: unknown[];
+    }>;
+  }
+
   // ─── Private ───
 
   private createSocket() {
