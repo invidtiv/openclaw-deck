@@ -34,6 +34,34 @@ const AGENT_ACCENTS = [
   "#2dd4bf",
 ];
 
+// ─── Column Config ───
+
+interface ColumnConfig {
+  id: string;
+  name?: string;
+  accent?: string;
+  icon?: string;
+}
+
+let _columnConfig: ColumnConfig[] | null = null;
+
+async function loadColumnConfig(): Promise<ColumnConfig[]> {
+  if (_columnConfig) return _columnConfig;
+  try {
+    const res = await fetch("/deck.config.json");
+    if (res.ok) {
+      const data = await res.json();
+      _columnConfig = data.columns ?? [];
+      console.log("[DeckStore] Loaded deck.config.json:", _columnConfig);
+      return _columnConfig!;
+    }
+  } catch {
+    // No config file — use gateway order
+  }
+  _columnConfig = [];
+  return [];
+}
+
 // ─── Store Shape ───
 
 interface DeckStore {
@@ -186,13 +214,41 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
         return;
       }
 
-      const newAgents: AgentConfig[] = result.agents.map((a, i) => ({
-        id: a.id,
-        name: a.identity?.name || a.name || a.id,
-        icon: a.identity?.emoji || String(i + 1),
-        accent: AGENT_ACCENTS[i % AGENT_ACCENTS.length],
-        context: "",
-      }));
+      // Load column config to control order and display
+      const columns = await loadColumnConfig();
+      const gatewayAgentsById = new Map(
+        result.agents.map((a) => [a.id, a])
+      );
+
+      // Build agent list: column config order first, then any remaining gateway agents
+      const orderedIds: string[] = [];
+      const columnById = new Map(columns.map((c) => [c.id, c]));
+
+      // 1. Agents defined in deck.config.json (in config order), only if they exist on gateway
+      for (const col of columns) {
+        if (gatewayAgentsById.has(col.id)) {
+          orderedIds.push(col.id);
+        }
+      }
+
+      // 2. Remaining gateway agents not in the config
+      for (const a of result.agents) {
+        if (!orderedIds.includes(a.id)) {
+          orderedIds.push(a.id);
+        }
+      }
+
+      const newAgents: AgentConfig[] = orderedIds.map((id, i) => {
+        const gw = gatewayAgentsById.get(id)!;
+        const col = columnById.get(id);
+        return {
+          id,
+          name: col?.name || gw.identity?.name || gw.name || id,
+          icon: col?.icon || gw.identity?.emoji || String(i + 1),
+          accent: col?.accent || AGENT_ACCENTS[i % AGENT_ACCENTS.length],
+          context: "",
+        };
+      });
 
       // Build sessions, preserving any existing message history
       const existingSessions = get().sessions;

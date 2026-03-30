@@ -1,0 +1,9 @@
+{
+  "columns": [
+    { "id": "main",        "name": "Main",         "accent": "#22d3ee", "icon": "M" },
+    { "id": "work",        "name": "Work",         "accent": "#a78bfa", "icon": "W" },
+    { "id": "personal",    "name": "Personal",     "accent": "#34d399", "icon": "P" },
+    { "id": "susana",      "name": "Susana",       "accent": "#f472b6", "icon": "S" },
+    { "id": "psych-coach", "name": "Psych Coach",  "accent": "#f59e0b", "icon": "Y" }
+  ]
+}
