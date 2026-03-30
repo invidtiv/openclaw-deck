@@ -346,7 +346,7 @@ export class GatewayClient {
       // so we skip it to avoid timing out.
       const hello = (await this.request("connect", {
         client: {
-          id: "gateway-client",
+          id: "openclaw-control-ui",
           version: "2026.2.16",
           platform: "web",
           mode: "webchat",
@@ -445,7 +445,7 @@ export class GatewayClient {
     const payload = this.buildDeviceAuthPayload({
       version: nonce ? "v2" : "v1",
       deviceId: identity.id,
-      clientId: "gateway-client",
+      clientId: "openclaw-control-ui",
       clientMode: "webchat",
       role: "operator",
       scopes: OPERATOR_SCOPES,
