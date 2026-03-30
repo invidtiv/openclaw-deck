@@ -49,6 +49,7 @@ interface SavedLayout {
   columnOrder: string[];
   agents: Record<string, { name?: string; icon?: string; accent?: string }>;
   sessionKeys?: Record<string, string>;
+  columnWidths?: Record<string, number>;
 }
 
 function loadSavedLayout(): SavedLayout | null {
@@ -102,6 +103,7 @@ interface DeckStore {
   client: GatewayClient | null;
   theme: string;
   selectedAgents: Set<string>;
+  columnWidths: Record<string, number>;
 
   // Actions
   initialize: (config: Partial<DeckConfig>) => void;
@@ -120,6 +122,7 @@ interface DeckStore {
   updateAgentConfig: (agentId: string, updates: Partial<Pick<AgentConfig, "name" | "icon" | "accent">>) => void;
   moveColumn: (agentId: string, direction: "left" | "right") => void;
   toggleSelectedAgent: (agentId: string) => void;
+  setColumnWidth: (agentId: string, width: number) => void;
   setAgentSessionKey: (agentId: string, sessionKey: string) => Promise<void>;
   listAgentSessions: (agentId: string) => Promise<Array<{ key: string; label: string; channel: string; updatedAt: number }>>;
   disconnect: () => void;
@@ -194,6 +197,7 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
   client: null,
   theme: 'midnight',
   selectedAgents: new Set<string>(),
+  columnWidths: {},
 
   initialize: (partialConfig) => {
     const config = { ...DEFAULT_CONFIG, ...partialConfig };
@@ -324,6 +328,7 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
         config: { ...get().config, agents: newAgents },
         sessions,
         columnOrder,
+        columnWidths: saved?.columnWidths || {},
       });
 
       // Load chat history for each agent in parallel
@@ -776,6 +781,15 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
       console.warn("[DeckStore] Gateway deleteAgent failed, removing locally:", err);
     }
     get().removeAgent(agentId);
+  },
+
+  setColumnWidth: (agentId, width) => {
+    const widths = { ...get().columnWidths, [agentId]: width };
+    set({ columnWidths: widths });
+    // Persist
+    const saved = loadSavedLayout() || { columnOrder: [], agents: {} };
+    saved.columnWidths = widths;
+    try { localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(saved)); } catch { /* */ }
   },
 
   toggleSelectedAgent: (agentId) => {

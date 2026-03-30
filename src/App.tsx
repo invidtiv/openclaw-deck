@@ -57,6 +57,7 @@ export default function App() {
   const columnOrder = useDeckStore((s) => s.columnOrder);
   const sessions = useDeckStore((s) => s.sessions);
   const selectedAgents = useDeckStore((s) => s.selectedAgents);
+  const columnWidths = useDeckStore((s) => s.columnWidths);
   const createAgentOnGateway = useDeckStore((s) => s.createAgentOnGateway);
   const theme = useDeckStore((s) => s.theme);
 
@@ -127,6 +128,7 @@ export default function App() {
             agentId={agentId}
             columnIndex={index}
             onPopOut={setPopOutAgentId}
+            columnWidth={columnWidths[agentId] || undefined}
           />
         ))}
       </div>

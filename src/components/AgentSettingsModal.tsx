@@ -60,11 +60,14 @@ export function AgentSettingsModal({
   const moveColumn = useDeckStore((s) => s.moveColumn);
   const setAgentSessionKey = useDeckStore((s) => s.setAgentSessionKey);
   const listAgentSessions = useDeckStore((s) => s.listAgentSessions);
+  const setColumnWidth = useDeckStore((s) => s.setColumnWidth);
+  const currentWidth = useDeckStore((s) => s.columnWidths[agent.id] || 0);
   const columnOrder = useDeckStore((s) => s.columnOrder);
   const agents = useDeckStore((s) => s.config.agents);
   const currentSessionKey = useDeckStore(
     (s) => s.sessions[agent.id]?.sessionKey || `agent:${agent.id}:deck-${agent.id}`
   );
+  const [colWidth, setColWidth] = useState(currentWidth || 400);
 
   const currentIndex = columnOrder.indexOf(agent.id);
   const totalColumns = columnOrder.length;
@@ -199,6 +202,38 @@ export function AgentSettingsModal({
                 </button>
               ))}
             </div>
+          </div>
+        </div>
+
+        {/* Column Width */}
+        <div className={styles.field}>
+          <label className={styles.label}>
+            Column Width ({colWidth === 0 ? "default" : `${colWidth}px`})
+          </label>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 4 }}>
+            <input
+              type="range"
+              min={280}
+              max={800}
+              step={10}
+              value={colWidth || 400}
+              onChange={(e) => {
+                const v = parseInt(e.target.value, 10);
+                setColWidth(v);
+                setColumnWidth(agent.id, v);
+              }}
+              style={{ flex: 1, accentColor: accent }}
+            />
+            <button
+              className={styles.cancelBtn}
+              style={{ padding: "3px 8px", fontSize: 10 }}
+              onClick={() => {
+                setColWidth(0);
+                setColumnWidth(agent.id, 0);
+              }}
+            >
+              Reset
+            </button>
           </div>
         </div>
 
