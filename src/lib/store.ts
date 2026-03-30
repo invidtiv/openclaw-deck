@@ -292,6 +292,31 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
         }
       }
 
+      // Fetch session list to get real model info per agent
+      let defaultModel = "";
+      const agentModelMap = new Map<string, string>();
+      try {
+        const sessionsList = await client.listSessions({ limit: 100 });
+        if (sessionsList.sessions) {
+          // Default model from gateway
+          const defaults = (sessionsList as Record<string, unknown>).defaults as
+            { modelProvider?: string; model?: string } | undefined;
+          if (defaults?.modelProvider && defaults?.model) {
+            defaultModel = `${defaults.modelProvider}/${defaults.model}`;
+          }
+          // Find most recent session per agent to get its model
+          for (const s of sessionsList.sessions) {
+            const parts = s.key.split(":");
+            const aid = parts.length >= 2 ? parts[1] : "";
+            if (aid && !agentModelMap.has(aid) && s.modelProvider && s.model) {
+              agentModelMap.set(aid, `${s.modelProvider}/${s.model}`);
+            }
+          }
+        }
+      } catch {
+        // Non-critical — just won't have model info
+      }
+
       // Build agents: saved overrides > deck.config.json > gateway identity > defaults
       const newAgents: AgentConfig[] = orderedIds.map((id, i) => {
         const gw = gatewayAgentsById.get(id)!;
@@ -302,6 +327,7 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
           name: s?.name || col?.name || gw.identity?.name || gw.name || id,
           icon: s?.icon || col?.icon || gw.identity?.emoji || String(i + 1),
           accent: s?.accent || col?.accent || AGENT_ACCENTS[i % AGENT_ACCENTS.length],
+          model: agentModelMap.get(id) || defaultModel,
           context: "",
         };
       });
