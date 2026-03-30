@@ -50,6 +50,7 @@ function getGatewayConfig() {
 export default function App() {
   const [activeTab, setActiveTab] = useState("All Agents");
   const [showAddModal, setShowAddModal] = useState(false);
+  const [popOutAgentId, setPopOutAgentId] = useState<string | null>(null);
   const [initialAgents] = useState<AgentConfig[]>(() =>
     buildFallbackAgents()
   );
@@ -104,11 +105,25 @@ export default function App() {
 
       <div className="deck-columns">
         {columnOrder.map((agentId, index) => (
-          <AgentColumn key={agentId} agentId={agentId} columnIndex={index} />
+          <AgentColumn
+            key={agentId}
+            agentId={agentId}
+            columnIndex={index}
+            onPopOut={setPopOutAgentId}
+          />
         ))}
       </div>
 
       <StatusBar />
+
+      {popOutAgentId && (
+        <AgentColumn
+          agentId={popOutAgentId}
+          columnIndex={columnOrder.indexOf(popOutAgentId)}
+          popOut
+          onPopIn={() => setPopOutAgentId(null)}
+        />
+      )}
 
       {showAddModal && (
         <AddAgentModal

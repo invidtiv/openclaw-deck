@@ -564,6 +564,40 @@
   animation: pulse 1s ease-in-out infinite;
 }
 
+/* ─── Pop-out Overlay ─── */
+.popOutOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(8px);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn 0.15s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.popOutColumn {
+  width: 700px;
+  max-width: 90vw;
+  max-height: 90vh;
+  min-width: 400px;
+  border-radius: 12px;
+  border: 1px solid var(--theme-border);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
+  animation: popIn 0.2s ease;
+}
+
+@keyframes popIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
 /* ─── Failover Badge ─── */
 .failoverBadge {
   font-size: 10px;

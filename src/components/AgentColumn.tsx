@@ -198,7 +198,21 @@ function getContextWindow(model?: string): number {
 
 // ─── Main Column ───
 
-export function AgentColumn({ agentId, columnIndex }: { agentId: string; columnIndex: number }) {
+export function AgentColumn({
+  agentId,
+  columnIndex,
+  popOut = false,
+  onPopOut,
+  onPopIn,
+  columnWidth,
+}: {
+  agentId: string;
+  columnIndex: number;
+  popOut?: boolean;
+  onPopOut?: (agentId: string) => void;
+  onPopIn?: () => void;
+  columnWidth?: number;
+}) {
   const session = useAgentSession(agentId);
   const config = useAgentConfig(agentId);
   const send = useSendMessage(agentId);
@@ -251,12 +265,8 @@ export function AgentColumn({ agentId, columnIndex }: { agentId: string; columnI
     lastMessage?.role === "assistant" &&
     !lastMessage?.streaming;
 
-  return (
-    <div 
-      className={styles.column} 
-      data-status={session.status}
-      data-has-completed-work={hasCompletedWork}
-    >
+  const columnContent = (
+    <>
       {/* Header */}
       <div className={styles.header}>
         <div
@@ -287,15 +297,25 @@ export function AgentColumn({ agentId, columnIndex }: { agentId: string; columnI
             <FailoverBadge session={session} />
           </div>
           <div className={styles.headerUsage}>
-            <span style={{ 
-              opacity: contextPercent > 80 ? 1 : 0.6, 
-              color: contextPercent > 90 ? '#ef4444' : contextPercent > 80 ? '#f59e0b' : 'inherit' 
+            <span style={{
+              opacity: contextPercent > 80 ? 1 : 0.6,
+              color: contextPercent > 90 ? '#ef4444' : contextPercent > 80 ? '#f59e0b' : 'inherit'
             }}>
               {totalTokens.toLocaleString()} tokens · {contextPercent.toFixed(1)}% of context
             </span>
           </div>
         </div>
         <div className={styles.headerActions}>
+          {!popOut && onPopOut && (
+            <button className={styles.headerBtn} title="Pop out" onClick={() => onPopOut(agentId)}>
+              ⇱
+            </button>
+          )}
+          {popOut && onPopIn && (
+            <button className={styles.headerBtn} title="Pop back in" onClick={onPopIn}>
+              ⇲
+            </button>
+          )}
           <button className={styles.headerBtn} title="Settings" onClick={() => setShowSettings(true)}>
             ⚙
           </button>
@@ -390,6 +410,31 @@ export function AgentColumn({ agentId, columnIndex }: { agentId: string; columnI
           onClose={() => setShowSettings(false)}
         />
       )}
+    </>
+  );
+
+  if (popOut) {
+    return (
+      <div className={styles.popOutOverlay} onClick={onPopIn}>
+        <div
+          className={`${styles.column} ${styles.popOutColumn}`}
+          data-status={session.status}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {columnContent}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={styles.column}
+      data-status={session.status}
+      data-has-completed-work={hasCompletedWork}
+      style={columnWidth ? { minWidth: columnWidth, maxWidth: columnWidth } : undefined}
+    >
+      {columnContent}
     </div>
   );
 }
