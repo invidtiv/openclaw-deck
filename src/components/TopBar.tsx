@@ -1,9 +1,52 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useDeckStats } from "../hooks";
+import { useDeckStore } from "../lib/store";
 import { ThemeSwitcher } from "./ThemeSwitcher";
 import styles from "./TopBar.module.css";
 
-const TABS = ["All Agents", "Active", "Queued", "Completed"] as const;
+const TABS = ["All Agents", "Active", "Queued", "Completed", "Selected"] as const;
+
+function SelectedDropdown() {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const agents = useDeckStore((s) => s.config.agents);
+  const selectedAgents = useDeckStore((s) => s.selectedAgents);
+  const toggleSelectedAgent = useDeckStore((s) => s.toggleSelectedAgent);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <button className={styles.dropdownBtn} onClick={() => setOpen(!open)}>
+        {selectedAgents.size}/{agents.length} ▾
+      </button>
+      {open && (
+        <div className={styles.dropdown}>
+          {agents.map((a) => (
+            <label key={a.id} className={styles.dropdownItem}>
+              <input
+                type="checkbox"
+                checked={selectedAgents.has(a.id)}
+                onChange={() => toggleSelectedAgent(a.id)}
+              />
+              <span
+                className={styles.dropdownDot}
+                style={{ backgroundColor: a.accent }}
+              />
+              {a.name}
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function TopBar({
   activeTab,
@@ -15,6 +58,7 @@ export function TopBar({
   onAddAgent: () => void;
 }) {
   const stats = useDeckStats();
+  const selectedCount = useDeckStore((s) => s.selectedAgents.size);
   const [time, setTime] = useState(new Date());
 
   useEffect(() => {
@@ -46,8 +90,12 @@ export function TopBar({
             {tab === "Active" && stats.active > 0 && (
               <span className={styles.tabCount}>{stats.active}</span>
             )}
+            {tab === "Selected" && selectedCount > 0 && (
+              <span className={styles.tabCount}>{selectedCount}</span>
+            )}
           </button>
         ))}
+        {activeTab === "Selected" && <SelectedDropdown />}
       </div>
 
       {/* Stats */}

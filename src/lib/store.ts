@@ -101,6 +101,7 @@ interface DeckStore {
   columnOrder: string[];
   client: GatewayClient | null;
   theme: string;
+  selectedAgents: Set<string>;
 
   // Actions
   initialize: (config: Partial<DeckConfig>) => void;
@@ -118,6 +119,7 @@ interface DeckStore {
   loadChatHistory: (agentId: string) => Promise<void>;
   updateAgentConfig: (agentId: string, updates: Partial<Pick<AgentConfig, "name" | "icon" | "accent">>) => void;
   moveColumn: (agentId: string, direction: "left" | "right") => void;
+  toggleSelectedAgent: (agentId: string) => void;
   setAgentSessionKey: (agentId: string, sessionKey: string) => Promise<void>;
   listAgentSessions: (agentId: string) => Promise<Array<{ key: string; label: string; channel: string; updatedAt: number }>>;
   disconnect: () => void;
@@ -191,6 +193,7 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
   columnOrder: [],
   client: null,
   theme: 'midnight',
+  selectedAgents: new Set<string>(),
 
   initialize: (partialConfig) => {
     const config = { ...DEFAULT_CONFIG, ...partialConfig };
@@ -773,6 +776,18 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
       console.warn("[DeckStore] Gateway deleteAgent failed, removing locally:", err);
     }
     get().removeAgent(agentId);
+  },
+
+  toggleSelectedAgent: (agentId) => {
+    set((state) => {
+      const next = new Set(state.selectedAgents);
+      if (next.has(agentId)) {
+        next.delete(agentId);
+      } else {
+        next.add(agentId);
+      }
+      return { selectedAgents: next };
+    });
   },
 
   setAgentSessionKey: async (agentId, sessionKey) => {

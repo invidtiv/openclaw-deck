@@ -55,6 +55,8 @@ export default function App() {
     buildFallbackAgents()
   );
   const columnOrder = useDeckStore((s) => s.columnOrder);
+  const sessions = useDeckStore((s) => s.sessions);
+  const selectedAgents = useDeckStore((s) => s.selectedAgents);
   const createAgentOnGateway = useDeckStore((s) => s.createAgentOnGateway);
   const theme = useDeckStore((s) => s.theme);
 
@@ -104,7 +106,22 @@ export default function App() {
       />
 
       <div className="deck-columns">
-        {columnOrder.map((agentId, index) => (
+        {columnOrder
+          .filter((agentId) => {
+            if (activeTab === "All Agents") return true;
+            if (activeTab === "Selected") return selectedAgents.has(agentId);
+            const s = sessions[agentId];
+            if (!s) return false;
+            if (activeTab === "Active")
+              return s.status === "streaming" || s.status === "thinking" || s.status === "tool_use";
+            if (activeTab === "Queued") return s.status === "thinking";
+            if (activeTab === "Completed") {
+              const last = s.messages[s.messages.length - 1];
+              return s.status === "idle" && last?.role === "assistant" && !last?.streaming;
+            }
+            return true;
+          })
+          .map((agentId, index) => (
           <AgentColumn
             key={agentId}
             agentId={agentId}
