@@ -191,21 +191,19 @@ function SessionPicker({
   const setAgentSessionKey = useDeckStore((s) => s.setAgentSessionKey);
   const gatewayConnected = useDeckStore((s) => s.gatewayConnected);
 
-  const fetchSessions = useCallback(() => {
+  useEffect(() => {
     if (!gatewayConnected) return;
+    let cancelled = false;
     setLoading(true);
     listAgentSessions(agentId)
       .then((result) => {
-        setSessions(result);
+        if (!cancelled) setSessions(result);
       })
       .finally(() => {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       });
+    return () => { cancelled = true; };
   }, [agentId, gatewayConnected, listAgentSessions]);
-
-  useEffect(() => {
-    fetchSessions();
-  }, [fetchSessions]);
 
   const options = sessions.some((s) => s.key === currentSessionKey)
     ? sessions
@@ -224,8 +222,7 @@ function SessionPicker({
       className={styles.sessionSelect}
       value={currentSessionKey}
       disabled={loading || options.length === 0}
-      title="Click to refresh sessions"
-      onClick={fetchSessions}
+      title="Continue from session"
       onChange={(e) => {
         void setAgentSessionKey(agentId, e.target.value);
       }}
