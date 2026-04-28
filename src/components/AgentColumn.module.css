@@ -120,11 +120,18 @@
   line-height: 1;
   padding: 0 24px 0 8px;
   outline: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sessionSelect option {
   background: var(--theme-bgSecondary);
   color: var(--theme-text);
+  padding: 4px 8px;
+}
+
+.sessionSelect:focus {
+  border-color: var(--theme-inputFocus);
 }
 
 .sessionSelect:disabled {
