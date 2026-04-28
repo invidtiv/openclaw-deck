@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useDeckInit } from "./hooks";
 import { useDeckStore } from "./lib/store";
 import { AgentColumn } from "./components/AgentColumn";
@@ -9,10 +9,6 @@ import type { AgentConfig } from "./types";
 import { themes, applyTheme } from "./themes";
 import "./App.css";
 
-/**
- * Agent columns are fetched from the gateway on connect via agents.list.
- * A minimal fallback ("main") is provided in case the fetch fails.
- */
 function buildFallbackAgents(): AgentConfig[] {
   return [
     {
@@ -32,7 +28,6 @@ function getGatewayConfig() {
     import.meta.env.VITE_GATEWAY_URL ||
     "ws://127.0.0.1:18789";
 
-  // Resolve relative paths (e.g. "/ws") to full WebSocket URLs
   if (gatewayUrl.startsWith("/")) {
     const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
     gatewayUrl = `${proto}//${window.location.host}${gatewayUrl}`;
@@ -57,13 +52,15 @@ export default function App() {
   const columnOrder = useDeckStore((s) => s.columnOrder);
   const sessions = useDeckStore((s) => s.sessions);
   const selectedAgents = useDeckStore((s) => s.selectedAgents);
+  const squads = useDeckStore((s) => s.squads);
+  const viewColumnWidths = useDeckStore((s) => s.viewColumnWidths);
   const columnWidths = useDeckStore((s) => s.columnWidths);
+  const setViewColumnWidth = useDeckStore((s) => s.setViewColumnWidth);
   const createAgentOnGateway = useDeckStore((s) => s.createAgentOnGateway);
   const theme = useDeckStore((s) => s.theme);
 
   const { gatewayUrl, token } = getGatewayConfig();
 
-  // Apply theme on mount and when it changes
   useEffect(() => {
     const selectedTheme = themes[theme];
     if (selectedTheme) {
@@ -77,7 +74,6 @@ export default function App() {
     agents: initialAgents,
   });
 
-  // Cmd+1-9 to focus column inputs
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.metaKey && e.key >= "1" && e.key <= "9") {
@@ -98,6 +94,16 @@ export default function App() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
+  const activeSquad = squads.find((s) => s.id === activeTab);
+
+  const getColumnWidth = useCallback((agentId: string): number | undefined => {
+    return viewColumnWidths[activeTab]?.[agentId] ?? columnWidths[agentId] ?? undefined;
+  }, [activeTab, viewColumnWidths, columnWidths]);
+
+  const handleResize = useCallback((agentId: string, width: number) => {
+    setViewColumnWidth(activeTab, agentId, width);
+  }, [activeTab, setViewColumnWidth]);
+
   return (
     <div className="deck-root">
       <TopBar
@@ -111,6 +117,7 @@ export default function App() {
           .filter((agentId) => {
             if (activeTab === "All Agents") return true;
             if (activeTab === "Selected") return selectedAgents.has(agentId);
+            if (activeSquad) return activeSquad.agentIds.includes(agentId);
             const s = sessions[agentId];
             if (!s) return false;
             if (activeTab === "Active")
@@ -128,7 +135,8 @@ export default function App() {
             agentId={agentId}
             columnIndex={index}
             onPopOut={setPopOutAgentId}
-            columnWidth={columnWidths[agentId] || undefined}
+            columnWidth={getColumnWidth(agentId)}
+            onResize={handleResize}
           />
         ))}
       </div>

@@ -7,6 +7,7 @@ import type {
   DeckConfig,
   GatewayEvent,
   SessionUsage,
+  Squad,
 } from "../types";
 import { GatewayClient } from "./gateway-client";
 import { themes, applyTheme } from "../themes";
@@ -50,6 +51,9 @@ interface SavedLayout {
   agents: Record<string, { name?: string; icon?: string; accent?: string }>;
   sessionKeys?: Record<string, string>;
   columnWidths?: Record<string, number>;
+  /** Per-view per-agent column widths: { viewId: { agentId: width } } */
+  viewColumnWidths?: Record<string, Record<string, number>>;
+  squads?: Squad[];
 }
 
 function loadSavedLayout(): SavedLayout | null {
@@ -63,11 +67,14 @@ function loadSavedLayout(): SavedLayout | null {
 
 function saveLayout(columnOrder: string[], agents: AgentConfig[]) {
   try {
+    const existing = loadSavedLayout();
     const layout: SavedLayout = {
       columnOrder,
       agents: Object.fromEntries(
         agents.map((a) => [a.id, { name: a.name, icon: a.icon, accent: a.accent }])
       ),
+      sessionKeys: existing?.sessionKeys,
+      columnWidths: existing?.columnWidths,
     };
     localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(layout));
   } catch {
@@ -104,6 +111,9 @@ interface DeckStore {
   theme: string;
   selectedAgents: Set<string>;
   columnWidths: Record<string, number>;
+  /** Per-view per-agent column widths: { viewId: { agentId: width } } */
+  viewColumnWidths: Record<string, Record<string, number>>;
+  squads: Squad[];
 
   // Actions
   initialize: (config: Partial<DeckConfig>) => void;
@@ -123,8 +133,14 @@ interface DeckStore {
   moveColumn: (agentId: string, direction: "left" | "right") => void;
   toggleSelectedAgent: (agentId: string) => void;
   setColumnWidth: (agentId: string, width: number) => void;
+  setViewColumnWidth: (viewId: string, agentId: string, width: number) => void;
+  getViewColumnWidth: (viewId: string, agentId: string) => number | undefined;
   setAgentSessionKey: (agentId: string, sessionKey: string) => Promise<void>;
   listAgentSessions: (agentId: string) => Promise<Array<{ key: string; label: string; channel: string; updatedAt: number }>>;
+  createSquad: (name: string) => string;
+  deleteSquad: (squadId: string) => void;
+  renameSquad: (squadId: string, name: string) => void;
+  toggleAgentInSquad: (squadId: string, agentId: string) => void;
   disconnect: () => void;
   setTheme: (themeId: string) => void;
 }
@@ -189,6 +205,28 @@ function makeId(): string {
 
 // ─── Store ───
 
+function loadSquads(): Squad[] {
+  const saved = loadSavedLayout();
+  return saved?.squads ?? [];
+}
+
+function saveSquads(squads: Squad[]) {
+  const saved = loadSavedLayout() || { columnOrder: [], agents: {} };
+  saved.squads = squads;
+  try { localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(saved)); } catch { /* */ }
+}
+
+function loadViewColumnWidths(): Record<string, Record<string, number>> {
+  const saved = loadSavedLayout();
+  return saved?.viewColumnWidths ?? {};
+}
+
+function saveViewColumnWidths(viewColumnWidths: Record<string, Record<string, number>>) {
+  const saved = loadSavedLayout() || { columnOrder: [], agents: {} };
+  saved.viewColumnWidths = viewColumnWidths;
+  try { localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(saved)); } catch { /* */ }
+}
+
 export const useDeckStore = create<DeckStore>((set, get) => ({
   config: DEFAULT_CONFIG,
   sessions: {},
@@ -198,6 +236,8 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
   theme: 'midnight',
   selectedAgents: new Set<string>(),
   columnWidths: {},
+  viewColumnWidths: loadViewColumnWidths(),
+  squads: loadSquads(),
 
   initialize: (partialConfig) => {
     const config = { ...DEFAULT_CONFIG, ...partialConfig };
@@ -812,10 +852,51 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
   setColumnWidth: (agentId, width) => {
     const widths = { ...get().columnWidths, [agentId]: width };
     set({ columnWidths: widths });
-    // Persist
     const saved = loadSavedLayout() || { columnOrder: [], agents: {} };
     saved.columnWidths = widths;
     try { localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(saved)); } catch { /* */ }
+  },
+
+  setViewColumnWidth: (viewId, agentId, width) => {
+    const vcw = { ...get().viewColumnWidths };
+    vcw[viewId] = { ...vcw[viewId], [agentId]: width };
+    set({ viewColumnWidths: vcw });
+    saveViewColumnWidths(vcw);
+  },
+
+  getViewColumnWidth: (viewId, agentId) => {
+    return get().viewColumnWidths[viewId]?.[agentId];
+  },
+
+  createSquad: (name) => {
+    const id = `squad-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const squad: Squad = { id, name, agentIds: [] };
+    const squads = [...get().squads, squad];
+    set({ squads });
+    saveSquads(squads);
+    return id;
+  },
+
+  deleteSquad: (squadId) => {
+    const squads = get().squads.filter((s) => s.id !== squadId);
+    set({ squads });
+    saveSquads(squads);
+  },
+
+  renameSquad: (squadId, name) => {
+    const squads = get().squads.map((s) => s.id === squadId ? { ...s, name } : s);
+    set({ squads });
+    saveSquads(squads);
+  },
+
+  toggleAgentInSquad: (squadId, agentId) => {
+    const squads = get().squads.map((s) => {
+      if (s.id !== squadId) return s;
+      const has = s.agentIds.includes(agentId);
+      return { ...s, agentIds: has ? s.agentIds.filter((id) => id !== agentId) : [...s.agentIds, agentId] };
+    });
+    set({ squads });
+    saveSquads(squads);
   },
 
   toggleSelectedAgent: (agentId) => {

@@ -59,8 +59,15 @@
 /* ─── Tabs ─── */
 .tabs {
   display: flex;
+  align-items: center;
   gap: 2px;
   flex: 1;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .tab {
@@ -74,6 +81,7 @@
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s ease;
+  white-space: nowrap;
 }
 
 .tab:hover {
@@ -90,6 +98,85 @@
   margin-left: 6px;
   font-size: 10px;
   opacity: 0.5;
+}
+
+.tabDivider {
+  width: 1px;
+  height: 20px;
+  background: var(--theme-border);
+  margin: 0 6px;
+  flex-shrink: 0;
+}
+
+/* ─── Squad Tabs ─── */
+.squadTabWrapper {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  position: relative;
+}
+
+.squadTab {
+  padding-right: 10px;
+}
+
+.squadDeleteBtn {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: var(--theme-textMuted);
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.6;
+  transition: all 0.15s ease;
+  margin-left: -4px;
+}
+
+.squadDeleteBtn:hover {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+  opacity: 1;
+}
+
+.squadCreateBtn {
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px dashed var(--theme-borderLight);
+  background: transparent;
+  color: var(--theme-textMuted);
+  font-size: 11px;
+  font-family: "JetBrains Mono", monospace;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+  margin-left: 4px;
+}
+
+.squadCreateBtn:hover {
+  border-color: var(--theme-border);
+  color: var(--theme-textSecondary);
+  background: var(--theme-inputBg);
+}
+
+.squadInput {
+  width: 120px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--theme-inputBorder);
+  background: var(--theme-inputBg);
+  color: var(--theme-text);
+  font-size: 12px;
+  font-family: "DM Sans", sans-serif;
+  outline: none;
+}
+
+.squadInput:focus {
+  border-color: var(--theme-inputFocus);
 }
 
 /* ─── Selected Dropdown ─── */
@@ -115,7 +202,7 @@
   left: 0;
   margin-top: 4px;
   min-width: 180px;
-  background: #141519;
+  background: var(--theme-bgSecondary);
   border: 1px solid var(--theme-border);
   border-radius: 8px;
   padding: 4px 0;

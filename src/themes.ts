@@ -469,7 +469,8 @@ export function applyTheme(theme: Theme) {
   
   // Set theme variant as data attribute
   root.setAttribute('data-theme-variant', theme.variant);
-  
+  root.style.setProperty('color-scheme', theme.variant);
+
   // Apply all color variables
   Object.entries(theme.colors).forEach(([key, value]) => {
     root.style.setProperty(`--theme-${key}`, value);

@@ -1,4 +1,4 @@
-import { useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useRef as useReactRef, useState, type KeyboardEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -14,6 +14,13 @@ import { AgentSettingsModal } from "./AgentSettingsModal";
 import { VoiceRecordButton } from "./VoiceRecordButton";
 import type { AgentStatus, ChatMessage, AgentSession } from "../types";
 import styles from "./AgentColumn.module.css";
+
+interface SessionOption {
+  key: string;
+  label: string;
+  channel: string;
+  updatedAt: number;
+}
 
 // ─── Status Indicator ───
 
@@ -169,6 +176,72 @@ function FailoverBadge({ session }: { session: AgentSession }) {
   );
 }
 
+function SessionPicker({
+  agentId,
+  accent,
+  currentSessionKey,
+}: {
+  agentId: string;
+  accent: string;
+  currentSessionKey: string;
+}) {
+  const [sessions, setSessions] = useState<SessionOption[]>([]);
+  const [loading, setLoading] = useState(false);
+  const listAgentSessions = useDeckStore((s) => s.listAgentSessions);
+  const setAgentSessionKey = useDeckStore((s) => s.setAgentSessionKey);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    listAgentSessions(agentId)
+      .then((result) => {
+        if (!cancelled) setSessions(result);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [agentId, listAgentSessions]);
+
+  const options = sessions.some((s) => s.key === currentSessionKey)
+    ? sessions
+    : [
+        {
+          key: currentSessionKey,
+          label: currentSessionKey.split(":").slice(2).join(":") || "Current session",
+          channel: "",
+          updatedAt: 0,
+        },
+        ...sessions,
+      ];
+
+  return (
+    <select
+      className={styles.sessionSelect}
+      value={currentSessionKey}
+      disabled={loading || options.length === 0}
+      title="Continue from session"
+      onChange={(e) => {
+        void setAgentSessionKey(agentId, e.target.value);
+      }}
+      style={{ borderColor: `${accent}44` }}
+    >
+      {loading && options.length === 0 ? (
+        <option value={currentSessionKey}>Loading sessions...</option>
+      ) : (
+        options.map((s) => (
+          <option key={s.key} value={s.key}>
+            {s.channel ? `${s.channel}: ${s.label}` : s.label}
+          </option>
+        ))
+      )}
+    </select>
+  );
+}
+
 // ─── Main Column ───
 
 export function AgentColumn({
@@ -178,6 +251,7 @@ export function AgentColumn({
   onPopOut,
   onPopIn,
   columnWidth,
+  onResize,
 }: {
   agentId: string;
   columnIndex: number;
@@ -185,15 +259,42 @@ export function AgentColumn({
   onPopOut?: (agentId: string) => void;
   onPopIn?: () => void;
   columnWidth?: number;
+  onResize?: (agentId: string, width: number) => void;
 }) {
   const session = useAgentSession(agentId);
   const config = useAgentConfig(agentId);
   const send = useSendMessage(agentId);
-  const deleteAgentOnGateway = useDeckStore((s) => s.deleteAgentOnGateway);
   const [input, setInput] = useState("");
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const scrollRef = useAutoScroll(session?.messages);
+  const columnRef = useReactRef<HTMLDivElement>(null);
+  const [resizing, setResizing] = useState(false);
+
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    if (!onResize || !columnRef.current) return;
+    setResizing(true);
+    const startX = e.clientX;
+    const startWidth = columnRef.current.getBoundingClientRect().width;
+
+    const onMouseMove = (ev: MouseEvent) => {
+      const newWidth = Math.max(280, Math.min(800, startWidth + ev.clientX - startX));
+      onResize(agentId, newWidth);
+    };
+
+    const onMouseUp = () => {
+      setResizing(false);
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+  }, [agentId, onResize]);
 
   if (!config || !session) return null;
 
@@ -232,6 +333,7 @@ export function AgentColumn({
     session.messages.length > 0 &&
     lastMessage?.role === "assistant" &&
     !lastMessage?.streaming;
+  const currentSessionKey = session.sessionKey || `agent:${agentId}:deck-${agentId}`;
 
   const columnContent = (
     <>
@@ -260,6 +362,11 @@ export function AgentColumn({
             </span>
             <FailoverBadge session={session} />
           </div>
+          <SessionPicker
+            agentId={agentId}
+            accent={config.accent}
+            currentSessionKey={currentSessionKey}
+          />
         </div>
         <div className={styles.headerActions}>
           {!popOut && onPopOut && (
@@ -275,22 +382,6 @@ export function AgentColumn({
           <button className={styles.headerBtn} title="Settings" onClick={() => setShowSettings(true)}>
             ⚙
           </button>
-          {agentId !== "main" && (
-            <button
-              className={`${styles.deleteBtn} ${confirmDelete ? styles.confirmDelete : ""}`}
-              title={confirmDelete ? "Click again to confirm" : "Delete agent"}
-              onClick={() => {
-                if (confirmDelete) {
-                  deleteAgentOnGateway(agentId);
-                } else {
-                  setConfirmDelete(true);
-                  setTimeout(() => setConfirmDelete(false), 3000);
-                }
-              }}
-            >
-              {confirmDelete ? "✕" : "×"}
-            </button>
-          )}
         </div>
       </div>
 
@@ -385,12 +476,16 @@ export function AgentColumn({
 
   return (
     <div
-      className={styles.column}
+      ref={columnRef}
+      className={`${styles.column} ${resizing ? styles.columnResizing : ""}`}
       data-status={session.status}
       data-has-completed-work={hasCompletedWork}
       style={columnWidth ? { minWidth: columnWidth, maxWidth: columnWidth } : undefined}
     >
       {columnContent}
+      {!popOut && onResize && (
+        <div className={styles.resizeHandle} onMouseDown={handleResizeStart} />
+      )}
     </div>
   );
 }

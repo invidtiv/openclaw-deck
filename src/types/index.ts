@@ -117,6 +117,14 @@ export interface DeckConfig {
   agents: AgentConfig[];
 }
 
+// ─── Squad Types ───
+
+export interface Squad {
+  id: string;
+  name: string;
+  agentIds: string[];
+}
+
 // ─── Store Types ───
 
 export interface DeckState {
