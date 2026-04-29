@@ -390,10 +390,6 @@ export class GatewayClient {
 
   private async completeHandshake(_nonce: string): Promise<void> {
     try {
-      // Send the connect request immediately — the gateway enforces a tight
-      // deadline after the challenge.  Device identity (Ed25519 signing) is
-      // expensive and optional when dangerouslyDisableDeviceAuth is enabled,
-      // so we skip it to avoid timing out.
       const hello = (await this.request("connect", {
         client: {
           id: "openclaw-control-ui",
